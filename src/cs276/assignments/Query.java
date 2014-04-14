@@ -7,8 +7,13 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.List;
+import java.util.Iterator;
 
 public class Query {
 
@@ -31,10 +36,8 @@ public class Query {
 	 * */
 	private static PostingList readPosting(FileChannel fc, int termId)
 			throws IOException {
-		/*
-		 * Your code here
-		 */
-		return null;
+		fc.position(posDict.get(termId));
+		return index.readPosting(fc);
 	}
 
 	public static void main(String[] args) throws IOException {
@@ -66,6 +69,7 @@ public class Query {
 		/* Index file */
 		RandomAccessFile indexFile = new RandomAccessFile(new File(input,
 				"corpus.index"), "r");
+		FileChannel indexfc = indexFile.getChannel();
 
 		String line = null;
 		/* Term dictionary */
@@ -102,11 +106,80 @@ public class Query {
 
 		/* For each query */
 		while ((line = br.readLine()) != null) {
-			/*
-			 * Your code here
-			 */
+			String[] tokens = line.trim().split(" ");
+			List<Integer> resultList = processQuery(tokens, indexfc);
+			//Print Results
+			if (resultList == null || resultList.isEmpty()){
+				System.out.println("no results found");
+			} else {
+				//Sort and print results
+				TreeSet<String> results = new TreeSet<String>();
+				for (Integer docId : resultList){
+					results.add(docDict.get(docId));
+				}
+				for (String page : results){
+					System.out.println(page);
+				}	
+			}
 		}
 		br.close();
 		indexFile.close();
+	}
+	/**
+	 * Process the given query array on the given index
+	 * @param query
+	 * @param indexfc
+	 * @return
+	 */
+	private static List<Integer> processQuery(String[] query, FileChannel indexfc) throws IOException{
+		TreeSet<PostingList> plists = new TreeSet<PostingList>(new Comparator<PostingList>(){
+			public int compare(PostingList p1, PostingList p2) {
+				return freqDict.get(p1.getTermId()) - freqDict.get(p2.getTermId());
+			}
+		});
+		//Read in all the postings lists
+		for (String token : query){
+			if (termDict.containsKey(token)){
+				plists.add(readPosting(indexfc,termDict.get(token)));
+			} else {
+				return null;
+			}
+		}
+		if (plists.isEmpty()) return null;
+		//Intersect the resulting postings lists in increasing freq order
+		List<Integer> resultList = plists.first().getList();
+		plists.remove(plists.first());//Pop off the first posting list
+		for (PostingList pl : plists){
+			resultList = intersectLists(resultList, pl.getList());
+		}
+		return resultList;
+	}
+	
+	/**
+	 * Takes two document lists and returns their intersection
+	 * @param list1
+	 * @param list2
+	 */
+	private static List<Integer> intersectLists(List<Integer> list1, List<Integer> list2){
+		List<Integer> resultList = new ArrayList<Integer>();
+		Iterator<Integer> iter1 = list1.iterator();
+		Iterator<Integer> iter2 = list2.iterator();
+		Integer doc1 = popNextOrNull(iter1);
+		Integer doc2 = popNextOrNull(iter2);
+		while (doc1 != null && doc2 != null){
+			if (doc1.equals(doc2)){
+				resultList.add(doc1);
+				doc1 = popNextOrNull(iter1);
+				doc2 = popNextOrNull(iter2);
+			} else if (doc1 < doc2) {
+				doc1 = popNextOrNull(iter1);
+			} else {
+				doc2 = popNextOrNull(iter2);
+			}
+		}
+		return resultList;
+	}
+	static <X> X popNextOrNull(Iterator<X> p) {
+		return p.hasNext() ? p.next() : null;
 	}
 }
