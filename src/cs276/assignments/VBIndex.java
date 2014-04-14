@@ -46,8 +46,7 @@ public class VBIndex implements BaseIndex {
 			do {
 				byteStack.push(new Byte((byte) (n % 128)));
 				n = n / 128;
-			} while (n >= 128);
-			
+			} while (n >= 1);
 			// Set continuation bit of last byte on stack
 			byteStack.set(byteStack.size() - 1, (byte) (byteStack.lastElement() | 0x80));
 			
