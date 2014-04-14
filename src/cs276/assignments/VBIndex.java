@@ -3,8 +3,6 @@ package cs276.assignments;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Stack;
 
@@ -44,12 +42,10 @@ public class VBIndex implements BaseIndex {
 	 */
 	private void VBEncode(int[] gapList, ByteBuffer VBGapBuf) {
 		Stack<Byte> byteStack = new Stack<Byte>();
-		int numBytes = 0;
 		for (int n : gapList) {
 			do {
 				byteStack.push(new Byte((byte) (n % 128)));
 				n = n / 128;
-				numBytes++;
 			} while (n >= 128);
 			
 			// Set continuation bit of last byte on stack
@@ -116,6 +112,6 @@ public class VBIndex implements BaseIndex {
 		int[] gaps = gapEncode(p.getList());
 		VBEncode(gaps, buf);
 		buf.flip();
-		int numBytes = fc.write(buf);
+		fc.write(buf);
 	}
 }
