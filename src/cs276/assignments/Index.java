@@ -249,18 +249,26 @@ public class Index {
 		Iterator<Integer> iter2 = p2.getList().iterator();
 		Integer doc1 = popNextOrNull(iter1);
 		Integer doc2 = popNextOrNull(iter2);
-		while (doc1 != null || doc2 != null){
-			if (doc1 == doc2){
+		while (doc1 != null && doc2 != null){
+			if (doc1.equals(doc2)){
 				p.getList().add(doc1);
 				doc1 = popNextOrNull(iter1);
 				doc2 = popNextOrNull(iter2);
-			} else if (doc2 == null || (doc1 != null && doc1 < doc2)){
+			} else if (doc1 < doc2){
 				p.getList().add(doc1);
 				doc1 = popNextOrNull(iter1);
-			} else if (doc2 != null) {
+			} else {
 				p.getList().add(doc2);
 				doc2 = popNextOrNull(iter2);
 			}
+		}
+		while (doc1!=null) {
+			p.getList().add(doc1);
+			doc1 = popNextOrNull(iter1);
+		}
+		while (doc2!=null) {
+			p.getList().add(doc2);
+			doc2 = popNextOrNull(iter2);
 		}
 		return p;
 	}
