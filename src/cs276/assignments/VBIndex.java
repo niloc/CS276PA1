@@ -3,12 +3,11 @@ package cs276.assignments;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
 
 public class VBIndex implements BaseIndex {
-	private static final int INT_BYTES = Integer.SIZE / Byte.SIZE;
 	private static final int VB_INT_BYTES = Integer.SIZE / (Byte.SIZE - 1) + 1;
 	
 	/**
@@ -47,9 +46,7 @@ public class VBIndex implements BaseIndex {
 	private void VBEncode(int[] gapList, ByteBuffer VBGapBuf) {
 		Stack<Byte> byteStack = new Stack<Byte>();
 		for (int n : gapList) {
-			int numBytes = 0;
 			while (true) {
-				numBytes++;
 				byteStack.push(new Byte((byte) (n & 0x7f)));
 				if (n < 128) {
 					break;
@@ -97,17 +94,22 @@ public class VBIndex implements BaseIndex {
 	@Override
 	public PostingList readPosting(FileChannel fc) throws IOException {
 		//Read in termID and list length
-		ByteBuffer buf = ByteBuffer.allocate(INT_BYTES*2);
+		long currentPos = fc.position();
+		ByteBuffer buf = ByteBuffer.allocate(VB_INT_BYTES*2);
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
-		PostingList p = new PostingList(buf.getInt());
-		int listLength = buf.getInt();
+		// Decode termID, listLength
+		List<Integer> metaData = new ArrayList<Integer>();
+		int numBytes = VBDecode(buf, metaData, 2);
+		PostingList p = new PostingList(metaData.get(0));
+		int listLength = metaData.get(1);
+		fc.position(currentPos + numBytes);
 		//Read in list
-		long currentPos = fc.position();
+		currentPos = fc.position();
 		buf = ByteBuffer.allocate(VB_INT_BYTES * listLength);
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
-		int numBytes = VBDecode(buf, p.getList(), listLength);
+		numBytes = VBDecode(buf, p.getList(), listLength);
 		fc.position(currentPos + numBytes);
 		gapDecode(p.getList());
 		return p;
@@ -116,9 +118,10 @@ public class VBIndex implements BaseIndex {
 	@Override
 	public void writePosting(FileChannel fc, PostingList p) throws IOException {
 		//Postings list encoded with: termID, listLength, encoded gaps...
-		ByteBuffer buf = ByteBuffer.allocate(VB_INT_BYTES * p.getList().size() + 2 * INT_BYTES);
-		buf.putInt(p.getTermId());
-		buf.putInt(p.getList().size());
+		ByteBuffer buf = ByteBuffer.allocate(VB_INT_BYTES * (p.getList().size() + 2));
+		// Encode termID, listLength
+		int[] metaData = {p.getTermId(), p.getList().size()};
+		VBEncode(metaData, buf);
 		int[] gaps = gapEncode(p.getList());
 		VBEncode(gaps, buf);
 		buf.flip();
