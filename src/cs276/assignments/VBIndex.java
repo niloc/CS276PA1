@@ -104,7 +104,7 @@ public class VBIndex implements BaseIndex {
 		int listLength = buf.getInt();
 		//Read in list
 		long currentPos = fc.position();
-		buf = ByteBuffer.allocate(VB_INT_BYTES * listLength + 1);
+		buf = ByteBuffer.allocate(VB_INT_BYTES * listLength);
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
 		int numBytes = VBDecode(buf, p.getList(), listLength);
