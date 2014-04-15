@@ -3,6 +3,7 @@ package cs276.assignments;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Stack;
 
@@ -32,6 +33,9 @@ public class VBIndex implements BaseIndex {
 		for (int i = 1; i < gapList.size(); i++) {
 			gapList.set(i, gapList.get(i) + gapList.get(i-1));
 		}
+		if (gapList.size() < 40) {
+		}
+
 	}
 	
 	/**
@@ -43,18 +47,24 @@ public class VBIndex implements BaseIndex {
 	private void VBEncode(int[] gapList, ByteBuffer VBGapBuf) {
 		Stack<Byte> byteStack = new Stack<Byte>();
 		for (int n : gapList) {
-			do {
-				byteStack.push(new Byte((byte) (n % 128)));
+			int numBytes = 0;
+			while (true) {
+				numBytes++;
+				byteStack.push(new Byte((byte) (n & 0x7f)));
+				if (n < 128) {
+					break;
+				}
 				n = n / 128;
-			} while (n >= 128);
-			
-			// Set continuation bit of last byte on stack
-			byteStack.set(byteStack.size() - 1, (byte) (byteStack.lastElement() | 0x80));
+			}
 			
 			// Write encoded byte sequence to output array
 			Byte encoded;
 			while (!byteStack.empty()) {
 				encoded = byteStack.pop();
+				if (byteStack.size() == 0) {
+					// Set continuation bit of last byte
+					encoded = (byte) (encoded | 0x80);
+				} 
 				VBGapBuf.put(encoded);
 			}
 		}
@@ -72,7 +82,7 @@ public class VBIndex implements BaseIndex {
 		while (decodedCount < count && VBGapBuf.hasRemaining()) {
 			numBytes++;
 			byte curByte = VBGapBuf.get();
-			if (curByte > 0) {
+			if ((curByte & 0x80) == 0) {
 				n = 128 * n + curByte;
 			} else {
 				n = 128 * n + (curByte & 0x7f);
@@ -94,7 +104,7 @@ public class VBIndex implements BaseIndex {
 		int listLength = buf.getInt();
 		//Read in list
 		long currentPos = fc.position();
-		buf = ByteBuffer.allocate(VB_INT_BYTES * listLength);
+		buf = ByteBuffer.allocate(VB_INT_BYTES * listLength + 1);
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
 		int numBytes = VBDecode(buf, p.getList(), listLength);
