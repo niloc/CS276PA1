@@ -2,17 +2,43 @@ package cs276.assignments;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Stack;
 import java.util.BitSet;
 
 public class GammaIndex implements BaseIndex {
 	private static final int INT_BYTES = Integer.SIZE / Byte.SIZE;
 	private static final int VB_INT_BYTES = Integer.SIZE / (Byte.SIZE - 1) + 1;
+	
+	//Test Gamma Encoding
+	public boolean test(){
+		boolean passed = true;
+		int[] list = {1,23,145,1,56,45612,45,555,546545,1,1,1,154,1564,1,1,4564564,1111,14,5,4,5,6};
+		//int[] list = {1,2,3,4,9,1,24,1,3};
+		ByteBuffer bf = ByteBuffer.allocate(list.length * INT_BYTES);
+		int bytes = GammaEncode(list, bf);
+		System.out.println(bytes);
+		bf.limit(bytes);
+		System.out.println("Encoded");
+		for (byte b : bf.array()){
+			String s1 = String.format("%8s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0');
+			System.out.println(s1 + " ");
+		}		
+		List<Integer> results = new ArrayList<Integer>();
+		bf.rewind();
+		GammaDecode(bf,results,list.length);
+		for (int i = 0; i < list.length; i++) {
+			if (list[i] != results.get(i)){
+				System.out.println("Error encoding: " + list[i]);
+				passed = false;
+			}
+		}
+		if (passed){
+			System.out.println("Passed!");
+		}
+		return passed;
+	}
 	
 	/**
 	 * Encodes a postings list as a gap list.
@@ -24,7 +50,7 @@ public class GammaIndex implements BaseIndex {
 		for (int i = postingsList.size() - 1; i > 0; i--) {
 			 output[i] = postingsList.get(i) - postingsList.get(i-1);
 		}
-		output[0] = postingsList.get(0);
+		output[0] = postingsList.get(0)+1;//Offset first entry by 1, since 0 can't be encoded		
 		return output;
 	}
 	
@@ -33,12 +59,10 @@ public class GammaIndex implements BaseIndex {
 	 * @param gapList
 	 */
 	private void gapDecode(List<Integer> gapList) {
+		gapList.set(0,gapList.get(0)-1);//Undo offset
 		for (int i = 1; i < gapList.size(); i++) {
 			gapList.set(i, gapList.get(i) + gapList.get(i-1));
 		}
-		if (gapList.size() < 40) {
-		}
-
 	}
 	
 	/**
@@ -47,37 +71,43 @@ public class GammaIndex implements BaseIndex {
 	 * @param VBGapBuf - the output buffer of VB-encoded integers. Must be
 	 * 	large enough to hold the VB-encoded gapList.
 	 */
-	private void GammaEncode(int[] gapList, ByteBuffer gammaGapBuf) {
+	private int GammaEncode(int[] gapList, ByteBuffer gammaGapBuf) {
+		BitSet bits = new BitSet();
+		int idx = 0;
 		for (int n : gapList) {
 			if (n == 1) {
-				gammaGapBuf.put((byte) 0);
+				idx++;
 				continue;
 			}
-			BitSet bits = new BitSet();
-			int length = 0;
-			int tmp = n;
-			while (tmp != 0) {
-				tmp = (tmp >>> 1);
-				length++;
+			//Get #bits in Gamma Encode
+			int numBits = (int) Math.floor(Math.log(n)/Math.log(2));
+			//Set the length bits
+			bits.set(idx,idx+numBits);
+			idx+=numBits+1;
+			//Encode n
+			for (int i=0; i < numBits; i++){
+				if (((1 << i) & n) != 0){
+					bits.set(idx+numBits-i-1);
+				}
 			}
-			length--;
-			System.out.println("n: " + n + "len: " + length);
-
-			bits.set(0, length);
-			bits.set(length, false);
-			for (int i = length - 1; i >= 0; i--) {
-				int mask = (1 << i);
-				bits.set(2 * length - i, (n & mask) != 0);
-			}
-			
-			byte[] bytes = bits.toByteArray();
-			for (byte b : bytes) {
-				gammaGapBuf.put(b);
-			}
+			idx +=numBits;
 		}
+		//Extend bitset to byte boundary by setting last bit to be 1
+		if (idx%Byte.SIZE > 0){
+			bits.set(idx+(Byte.SIZE-idx%Byte.SIZE));
+		}
+		byte[] bytes = bits.toByteArray();
+		//Turn off last bit
+		if (idx%Byte.SIZE > 0){
+			bytes[bytes.length-1] = (byte) (~((int) 0x1) & (int) bytes[bytes.length-1]);
+		}
+		//Add to byte buffer
+		for (byte b : bytes){
+			gammaGapBuf.put(b);
+		}
+		return bytes.length-1;
 	}
-	
-	
+
 	public static byte[] toByteArray(BitSet bits) {
 	    byte[] bytes = new byte[bits.length()/8+1];
 	    for (int i=0; i<bits.length(); i++) {
@@ -96,11 +126,38 @@ public class GammaIndex implements BaseIndex {
 	 * @return - the number of bytes decoded
 	 */
 	private int GammaDecode(ByteBuffer gapBuf, List<Integer> output, int count) {
-		int n = 0, decodedCount = 0, numBytes = 0;
-		while (decodedCount < count && gapBuf.hasRemaining()) {
-			// TODO
+		System.out.println("Decoding: " + count);
+		int decodedCount = 0, idx = 0;
+		BitSet bits = BitSet.valueOf(gapBuf);
+		//While more numbers available
+		while (decodedCount < count){
+			if (!bits.get(idx)){//Found a 0
+				output.add(1);
+				idx++;
+				decodedCount++;
+			} else {
+				int length = 0;
+				while (bits.get(idx)){
+					length++;
+					idx++;
+					if (length > 32){
+						System.out.println("TOO BIG!");
+					}
+				}
+				//Pull out the number
+				int gap = 0;
+				for (int i=0; i<length; i++){
+					if (bits.get(idx+length-i)){
+						gap |= 0x1 << i;
+					}
+				}
+				gap |= 0x1 << length;//Add on first bit
+				decodedCount++;
+				output.add(gap);
+				idx+=length+1;
+			}
 		}
-
+		return (int) Math.ceil((double) idx /Byte.SIZE);
 	}
 
 	@Override
@@ -118,6 +175,7 @@ public class GammaIndex implements BaseIndex {
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
 		int numBytes = GammaDecode(buf, p.getList(), listLength);
+		System.out.println(numBytes);
 		fc.position(currentPos + numBytes);
 		gapDecode(p.getList());
 		return p;

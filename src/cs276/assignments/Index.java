@@ -100,6 +100,13 @@ public class Index {
 			}
 		}
 
+		//TEST GAMMA ENCODING
+		GammaIndex i = new GammaIndex();
+		if (!i.test()){
+			return;
+		}
+		
+		
 		/* BSBI indexing algorithm */
 		File[] dirlist = rootdir.listFiles();
 		Arrays.sort(dirlist);
