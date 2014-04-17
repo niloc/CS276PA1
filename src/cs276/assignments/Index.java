@@ -101,10 +101,10 @@ public class Index {
 		}
 
 		//TEST GAMMA ENCODING
-		GammaIndex i = new GammaIndex();
-		if (!i.test()){
-			return;
-		}
+//		GammaIndex i = new GammaIndex();
+	//	if (!i.test()){
+		//	return;
+	//	}
 		
 		
 		/* BSBI indexing algorithm */

@@ -105,6 +105,7 @@ public class GammaIndex implements BaseIndex {
 		for (byte b : bytes){
 			gammaGapBuf.put(b);
 		}
+//		System.out.println("Wrote: " + (bytes.length-1));
 		return bytes.length-1;
 	}
 
@@ -126,7 +127,7 @@ public class GammaIndex implements BaseIndex {
 	 * @return - the number of bytes decoded
 	 */
 	private int GammaDecode(ByteBuffer gapBuf, List<Integer> output, int count) {
-		System.out.println("Decoding: " + count);
+//		System.out.println("Decoding: " + count);
 		int decodedCount = 0, idx = 0;
 		BitSet bits = BitSet.valueOf(gapBuf);
 		//While more numbers available
@@ -175,7 +176,7 @@ public class GammaIndex implements BaseIndex {
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
 		int numBytes = GammaDecode(buf, p.getList(), listLength);
-		System.out.println(numBytes);
+	//	System.out.println("read: " + numBytes);
 		fc.position(currentPos + numBytes);
 		gapDecode(p.getList());
 		return p;
@@ -189,8 +190,11 @@ public class GammaIndex implements BaseIndex {
 		buf.putInt(p.getTermId());
 		buf.putInt(p.getList().size());
 		int[] gaps = gapEncode(p.getList());
-		GammaEncode(gaps, buf);
+		int bytes = GammaEncode(gaps, buf);
 		buf.flip();
+		buf.limit(INT_BYTES*2 + bytes);
+//		System.out.println("bytes: " + bytes);
+	//	System.out.println("limit: " + buf.limit());
 		fc.write(buf);
 	}
 }
