@@ -4,42 +4,14 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.BitSet;
+import java.util.Vector;
 
 public class GammaIndex implements BaseIndex {
 	private static final int INT_BYTES = Integer.SIZE / Byte.SIZE;
 	private static final int VB_INT_BYTES = Integer.SIZE / (Byte.SIZE - 1) + 1;
-	
-	//Test Gamma Encoding
-	public boolean test(){
-		boolean passed = true;
-		int[] list = {1,23,145,1,56,45612,45,555,546545,1,1,1,154,1564,1,1,4564564,1111,14,5,4,5,6};
-		//int[] list = {1,2,3,4,9,1,24,1,3};
-		ByteBuffer bf = ByteBuffer.allocate(list.length * INT_BYTES);
-		int bytes = GammaEncode(list, bf);
-		System.out.println(bytes);
-		bf.limit(bytes);
-		System.out.println("Encoded");
-		for (byte b : bf.array()){
-			String s1 = String.format("%8s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0');
-			System.out.println(s1 + " ");
-		}		
-		List<Integer> results = new ArrayList<Integer>();
-		bf.rewind();
-		GammaDecode(bf,results,list.length);
-		for (int i = 0; i < list.length; i++) {
-			if (list[i] != results.get(i)){
-				System.out.println("Error encoding: " + list[i]);
-				passed = false;
-			}
-		}
-		if (passed){
-			System.out.println("Passed!");
-		}
-		return passed;
-	}
-	
 	/**
 	 * Encodes a postings list as a gap list.
 	 * @param postingsList 
@@ -71,7 +43,7 @@ public class GammaIndex implements BaseIndex {
 	 * @param VBGapBuf - the output buffer of VB-encoded integers. Must be
 	 * 	large enough to hold the VB-encoded gapList.
 	 */
-	private int GammaEncode(int[] gapList, ByteBuffer gammaGapBuf) {
+	private int GammaEncode(List<Integer> gapList, ByteBuffer gammaGapBuf) {
 		BitSet bits = new BitSet();
 		int idx = 0;
 		for (int n : gapList) {
@@ -93,20 +65,15 @@ public class GammaIndex implements BaseIndex {
 			idx +=numBits;
 		}
 		//Extend bitset to byte boundary by setting last bit to be 1
-		if (idx%Byte.SIZE > 0){
-			bits.set(idx+(Byte.SIZE-idx%Byte.SIZE));
-		}
+		bits.set(idx+(Byte.SIZE-idx%Byte.SIZE));
 		byte[] bytes = bits.toByteArray();
 		//Turn off last bit
-		if (idx%Byte.SIZE > 0){
-			bytes[bytes.length-1] = (byte) (~((int) 0x1) & (int) bytes[bytes.length-1]);
-		}
+		bytes[bytes.length-1] = (byte) (~((int) 0x1) & (int) bytes[bytes.length-1]);
 		//Add to byte buffer
 		for (byte b : bytes){
 			gammaGapBuf.put(b);
 		}
-//		System.out.println("Wrote: " + (bytes.length-1));
-		return bytes.length-1;
+		return (int) Math.ceil((double) idx / Byte.SIZE);
 	}
 
 	public static byte[] toByteArray(BitSet bits) {
@@ -127,7 +94,6 @@ public class GammaIndex implements BaseIndex {
 	 * @return - the number of bytes decoded
 	 */
 	private int GammaDecode(ByteBuffer gapBuf, List<Integer> output, int count) {
-//		System.out.println("Decoding: " + count);
 		int decodedCount = 0, idx = 0;
 		BitSet bits = BitSet.valueOf(gapBuf);
 		//While more numbers available
@@ -141,9 +107,6 @@ public class GammaIndex implements BaseIndex {
 				while (bits.get(idx)){
 					length++;
 					idx++;
-					if (length > 32){
-						System.out.println("TOO BIG!");
-					}
 				}
 				//Pull out the number
 				int gap = 0;
@@ -163,20 +126,25 @@ public class GammaIndex implements BaseIndex {
 
 	@Override
 	public PostingList readPosting(FileChannel fc) throws IOException {
+		long currentPos = fc.position();
 		//Read in termID and list length
 		ByteBuffer buf = ByteBuffer.allocate(INT_BYTES*2);
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
-		// Decode termID, listLength
-		PostingList p = new PostingList(buf.getInt());
-		int listLength = buf.getInt();
+		List<Integer> plist = new ArrayList<Integer>();
+		GammaDecode(buf,plist,2);
+		PostingList p = new PostingList(plist.get(0)-1);
+		int listLength = plist.get(1);
 		//Read in list
-		long currentPos = fc.position();
-		buf = ByteBuffer.allocate(VB_INT_BYTES * listLength);
+		fc.position(currentPos);
+		buf = ByteBuffer.allocate(VB_INT_BYTES * listLength+2);
 		if (fc.read(buf) == -1) return null;
 		buf.rewind();
-		int numBytes = GammaDecode(buf, p.getList(), listLength);
-	//	System.out.println("read: " + numBytes);
+		plist.clear();
+		int numBytes = GammaDecode(buf, plist, listLength + 2);
+		for (int i = 2; i < plist.size(); i++){
+			p.getList().add(plist.get(i));
+		}
 		fc.position(currentPos + numBytes);
 		gapDecode(p.getList());
 		return p;
@@ -186,15 +154,48 @@ public class GammaIndex implements BaseIndex {
 	public void writePosting(FileChannel fc, PostingList p) throws IOException {
 		//Postings list encoded with: termID, listLength, encoded gaps...
 		ByteBuffer buf = ByteBuffer.allocate(VB_INT_BYTES * (p.getList().size() + 2));
-		// Encode termID, listLength
-		buf.putInt(p.getTermId());
-		buf.putInt(p.getList().size());
+		//Build the postings list
 		int[] gaps = gapEncode(p.getList());
-		int bytes = GammaEncode(gaps, buf);
+		Vector<Integer> list = new Vector<Integer>();
+		// Encode termID, listLength
+		list.add(p.getTermId()+1);
+		list.add(p.getList().size());
+		//Encode gaps
+		for (int g: gaps){
+			list.add(g);
+		}
+		int bytes = GammaEncode(list, buf);
+		buf.limit(bytes);
 		buf.flip();
-		buf.limit(INT_BYTES*2 + bytes);
-//		System.out.println("bytes: " + bytes);
-	//	System.out.println("limit: " + buf.limit());
 		fc.write(buf);
+	}
+	
+	//Test Gamma Encoding
+	public boolean test(){
+		boolean passed = true;
+		Integer[] list = {1,23,145,1,56,45612,45,555,546545,1,1,1,154,1564,1,1,4564564,1111,14,5,4,5,6};
+		//int[] list = {1,2,3,4,9,1,24,1,3};
+		ByteBuffer bf = ByteBuffer.allocate(list.length * INT_BYTES);
+		int bytes = GammaEncode(new ArrayList<Integer>(Arrays.asList(list)), bf);
+		System.out.println(bytes);
+		bf.limit(bytes);
+		System.out.println("Encoded");
+		for (byte b : bf.array()){
+			String s1 = String.format("%8s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0');
+			System.out.println(s1 + " ");
+		}		
+		List<Integer> results = new ArrayList<Integer>();
+		bf.rewind();
+		GammaDecode(bf,results,list.length);
+		for (int i = 0; i < list.length; i++) {
+			if (list[i] != results.get(i)){
+				System.out.println("Error encoding: " + list[i]);
+				passed = false;
+			}
+		}
+		if (passed){
+			System.out.println("Passed!");
+		}
+		return passed;
 	}
 }
